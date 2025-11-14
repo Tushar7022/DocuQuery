@@ -1,0 +1,9 @@
+{
+    "editor.cursorStyle": "line",
+    "cursor.terminal.usePreviewBox": true,
+    "editor.inlineSuggest.edits.allowCodeShifting": "never",
+    "editor.inlineSuggest.edits.renderSideBySide": "never",
+    "editor.inlineSuggest.enabled": false,
+    "diffEditor.useInlineViewWhenSpaceIsLimited": false,
+    "editor.inlineSuggest.showToolbar": "never"
+}
