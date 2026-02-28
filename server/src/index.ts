@@ -2,6 +2,7 @@ import express from "express";
 import cors from "cors";
 import dotenv from "dotenv";
 import uploadRouter from "./routes/upload.routes";
+import queryRouter from "./routes/query.routes";
 
 dotenv.config();
 
@@ -22,6 +23,7 @@ app.get("/health", (_req, res) => {
 
 // when we hit upload api, pass that to router.ts file
 app.use("/upload", uploadRouter);
+app.use("/query", queryRouter);
 
 const PORT = process.env.PORT || 8080;
 app.listen(PORT, () => {

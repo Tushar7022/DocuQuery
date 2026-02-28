@@ -3,6 +3,7 @@ import multer from "multer"; // library to handle file uploads
 import { extractPdfText } from "../service/pdfService";
 import { chunkText } from "../service/chunkService";
 import { supabase } from "../lib/supabaseClient";
+import { embedChunks } from "../service/embeddingService";
 import crypto from "crypto";
 
 
@@ -109,12 +110,28 @@ router.post("/", upload.single("file"), async (req, res) => {
       return res.status(500).json({ ok: false, docId, error: chunkErr.message });
     }
 
+    const chunkTexts = chunks;
+    const embeddings = await embedChunks(chunkTexts);
+
+    const { data: insertedChunks } = await supabase
+      .from("chunks")
+      .select("id, chunk_index")
+      .eq("doc_id", docId)
+      .order("chunk_index");
+
+    for (const row of insertedChunks!) {
+      await supabase
+        .from("chunks")
+        .update({ embedding: embeddings[row.chunk_index] })
+        .eq("id", row.id);
+    }
+
     return res.status(200).json({
       ok: true,
       docId,
       filename: req.file.originalname,
       chunkCount: chunks.length,
-      message: "Stored PDF in Storage + chunks in Postgres ✅",
+      message: "Stored PDF + chunks + embeddings ✅",
     });
   } catch (err: any) {
     return res.status(500).json({
