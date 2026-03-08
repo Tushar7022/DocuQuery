@@ -1,77 +1,193 @@
 # DocuQuery
-AI-powered document Q&amp;A system built with React, Node.js, and pgvector.
 
-DocuQuery - AI-Powered Document Q&A
-What it does:
-Upload PDF → Ask questions in plain English → Get accurate answers with citations
-User Experience:
-1. User uploads research paper/manual/report (PDF)
-2. System processes it in background (10-30 sec)
-3. User asks: "What were the main findings?"
-4. AI responds with answer + shows which page/section it came from
-5. User can ask follow-ups, system remembers context
-Technical Flow:
-Step 1: Upload & Extract
-User uploads PDF via React UI
-Backend receives file, extracts text with pdf-parse
-Stores PDF in Supabase Storage
-Step 2: Chunk & Embed
-Split text into ~500 word chunks (overlap for context)
-Each chunk → embedding API → 768-dim vector
-Store chunks + vectors in Postgres with pgvector
-Step 3: Query
+AI-powered document Q&A — upload any PDF and get instant, cited answers.
+
+**[Live Demo](https://docu-query-five.vercel.app)** · [Backend API](https://docuquery-backend-uc49.onrender.com/health)
+
+![Stack](https://img.shields.io/badge/stack-React%20%7C%20Node.js%20%7C%20Supabase%20%7C%20pgvector-5B5EF4?style=flat-square)
+![LLM](https://img.shields.io/badge/LLM-Groq%20llama--3.1--8b-orange?style=flat-square)
+![Embeddings](https://img.shields.io/badge/embeddings-HuggingFace%20MiniLM--L6-yellow?style=flat-square)
+
+---
+
+## What it does
+
+1. **Upload** a PDF (research paper, manual, report)
+2. **DocuQuery processes it** — extracts text, chunks it, generates vector embeddings
+3. **Ask questions** in plain English
+4. **Get answers** grounded in the document, with source citations
+
+---
+
+## Tech Stack
+
+| Layer | Technology |
+|---|---|
+| Frontend | React 19, TypeScript, Vite |
+| Backend | Node.js, Express 5, TypeScript |
+| Database | Supabase (Postgres + pgvector) |
+| Embeddings | HuggingFace `sentence-transformers/all-MiniLM-L6-v2` |
+| LLM | Groq API (`llama-3.1-8b-instant`) |
+| Storage | Supabase Storage |
+
+---
+
+## Architecture
+
+```
+PDF Upload
+    │
+    ▼
+Extract text (pdf-parse)
+    │
+    ▼
+Chunk into 500-word overlapping windows
+    │
+    ▼
+Embed chunks (HuggingFace) → store in pgvector
+    │
+    ▼
 User asks question
-Question → embedding API → vector
-pgvector finds top 3-5 most similar chunks (cosine similarity)
-Send question + relevant chunks to LLM
-Step 4: Answer
-LLM reads chunks, answers question
-Returns answer + chunk IDs as citations
-Frontend shows answer with "Page X" references
-Tech Stack:
-Frontend (React):
-File upload with drag-drop
-Chat interface (messages list)
-Loading states during processing
-Citation display
-Backend (Node.js + Express):
-/upload - receives PDF, triggers processing
-/query - takes question, returns answer
-PDF text extraction
-Embedding generation
-Vector similarity search
-Database (Supabase Postgres + pgvector):
-sql
-documents (id, filename, upload_date)
-chunks (id, doc_id, text, embedding, page_num)
-APIs:
-HuggingFace Inference API (embeddings) - FREE
-Groq API (LLM answers) - FREE
-Key Features:
-Smart chunking - Overlapping chunks so context isn't lost
-Citation system - Every answer shows source pages
-Multi-turn chat - Ask follow-ups
-Processing status - Shows "Processing..." while embedding
-What Makes It Interview-Ready:
-Node.js showcase:
-Async file handling
-Database operations (SQL + vector queries)
-REST API design
-External API integration
-Error handling
-React showcase:
-File upload component
-Real-time chat UI
-State management (uploaded docs, chat history)
-Loading/error states
-Responsive design
-System Design talking points:
-"Why 500 word chunks?" (balance context vs. precision)
-"How do you handle large PDFs?" (streaming, pagination)
-"How do you scale?" (caching embeddings, connection pooling)
-"What if vector search returns wrong chunks?" (re-ranking, score thresholds)
-Build Complexity:
-Not too easy: Real data pipeline, vector search, multi-API
-Not too hard: No model training, well-documented libraries
-Just right: 10 days with guidance
+    │
+    ▼
+Embed question → cosine similarity search (top 5 chunks)
+    │
+    ▼
+Groq LLM answers using retrieved context → cited response
+```
 
+---
+
+## Features
+
+- Drag-and-drop PDF upload (max 25MB)
+- Overlapping chunk strategy to preserve context across boundaries
+- In-memory embedding cache — repeated queries skip the HuggingFace API call
+- HuggingFace model warm-up on server start to eliminate cold-start latency
+- Citation-backed answers — LLM cites `[1]`, `[2]` mapped to source chunks
+- Multi-message chat UI with typing indicator and collapsible sources
+
+---
+
+## Running Locally
+
+### Prerequisites
+
+- Node.js 18+
+- A [Supabase](https://supabase.com) project with pgvector enabled
+- [HuggingFace](https://huggingface.co) API key (free)
+- [Groq](https://console.groq.com) API key (free)
+
+### Supabase Setup
+
+Run this SQL in your Supabase SQL editor:
+
+```sql
+create extension if not exists vector;
+
+create table documents (
+  id uuid primary key default gen_random_uuid(),
+  filename text not null,
+  storage_path text not null,
+  created_at timestamptz default now()
+);
+
+create table chunks (
+  id uuid primary key default gen_random_uuid(),
+  doc_id uuid references documents(id) on delete cascade,
+  chunk_index integer not null,
+  text text not null,
+  embedding vector(384)
+);
+
+create or replace function match_chunks(
+  query_embedding vector(384),
+  match_doc_id uuid,
+  match_count int
+)
+returns table (id uuid, chunk_index integer, text text, similarity float)
+language sql stable
+as $$
+  select id, chunk_index, text,
+    1 - (embedding <=> query_embedding) as similarity
+  from chunks
+  where doc_id = match_doc_id
+  order by embedding <=> query_embedding
+  limit match_count;
+$$;
+```
+
+Create a storage bucket named `pdfs`.
+
+### Backend
+
+```bash
+cd server
+npm install
+```
+
+Create `server/.env`:
+
+```
+SUPABASE_URL=your_supabase_url
+SUPABASE_SERVICE_ROLE_KEY=your_service_role_key
+SUPABASE_BUCKET=pdfs
+HUGGINGFACE_API_KEY=your_hf_key
+GROQ_API_KEY=your_groq_key
+PORT=8080
+```
+
+```bash
+npm run dev
+```
+
+### Frontend
+
+```bash
+cd client
+npm install
+npm run dev
+```
+
+Open [http://localhost:5173](http://localhost:5173).
+
+---
+
+## API
+
+### `POST /upload`
+
+Accepts `multipart/form-data` with a `file` field (PDF).
+
+```json
+{
+  "ok": true,
+  "docId": "uuid",
+  "filename": "paper.pdf",
+  "chunkCount": 42,
+  "message": "Stored PDF + chunks + embeddings ✅"
+}
+```
+
+### `POST /query`
+
+```json
+// Request
+{ "docId": "uuid", "question": "What are the main findings?" }
+
+// Response
+{
+  "ok": true,
+  "answer": "The main findings are... [1][2]",
+  "sources": [
+    { "chunkIndex": 3, "text": "..." },
+    { "chunkIndex": 7, "text": "..." }
+  ]
+}
+```
+
+### `GET /health`
+
+```json
+{ "ok": true, "message": "DocuQuery backend running 🚀" }
+```
