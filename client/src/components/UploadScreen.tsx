@@ -62,7 +62,7 @@ export default function UploadScreen({ onUpload }: Props) {
                     DocuQuery
                 </h1>
                 <p style={{ color: "var(--muted)", fontSize: 22, lineHeight: 1.6, maxWidth: 520, margin: "0 auto" }}>
-                    Upload any PDF and get instant, AI-powered answers — with citations.
+                    Ask questions about any PDF. Get cited answers.
                 </p>
             </div>
 
