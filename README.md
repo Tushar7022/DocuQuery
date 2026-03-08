@@ -2,7 +2,7 @@
 
 AI-powered document Q&A — upload any PDF and get instant, cited answers.
 
-**[Live Demo](https://docu-query-five.vercel.app)** · [Backend API](https://docuquery-backend-uc49.onrender.com/health)
+**[Live Demo](https://docu-query-five.vercel.app)**
 
 ![Stack](https://img.shields.io/badge/stack-React%20%7C%20Node.js%20%7C%20Supabase%20%7C%20pgvector-5B5EF4?style=flat-square)
 ![LLM](https://img.shields.io/badge/LLM-Groq%20llama--3.1--8b-orange?style=flat-square)
@@ -10,12 +10,46 @@ AI-powered document Q&A — upload any PDF and get instant, cited answers.
 
 ---
 
-## What it does
+## Overview
 
-1. **Upload** a PDF (research paper, manual, report)
-2. **DocuQuery processes it** — extracts text, chunks it, generates vector embeddings
-3. **Ask questions** in plain English
-4. **Get answers** grounded in the document, with source citations
+DocuQuery is a full-stack RAG (Retrieval-Augmented Generation) system. Upload any PDF — research paper, report, manual — and ask questions about it in plain English. The AI finds the most relevant sections and answers with citations.
+
+---
+
+## How It Works
+
+### 1. Upload & Extract
+The PDF is uploaded to Supabase Storage and its text is extracted server-side.
+
+### 2. Chunk & Embed
+The text is split into overlapping 500-word chunks to preserve context across boundaries. Each chunk is converted into a 384-dimensional vector using HuggingFace's `sentence-transformers/all-MiniLM-L6-v2` model and stored in Postgres with pgvector.
+
+### 3. Query
+When a question is asked, it goes through the same embedding model. pgvector finds the top 5 most semantically similar chunks using cosine similarity.
+
+### 4. Answer
+The retrieved chunks are passed as context to Groq's `llama-3.1-8b-instant` LLM, which answers the question and cites the relevant sections as `[1]`, `[2]`, etc.
+
+---
+
+## Architecture
+
+```
+Client (React + Vite)
+    │
+    │  POST /upload (multipart PDF)
+    │  POST /query  (question + docId)
+    ▼
+Server (Node.js + Express + TypeScript)
+    │
+    ├── PDF text extraction (pdf-parse)
+    ├── Text chunking (500 words, 50-word overlap)
+    ├── Embedding generation (HuggingFace API)
+    │       └── In-memory cache for repeated queries
+    └── Vector similarity search (Supabase pgvector RPC)
+            │
+            └── Groq LLM → cited answer
+```
 
 ---
 
@@ -26,122 +60,44 @@ AI-powered document Q&A — upload any PDF and get instant, cited answers.
 | Frontend | React 19, TypeScript, Vite |
 | Backend | Node.js, Express 5, TypeScript |
 | Database | Supabase (Postgres + pgvector) |
-| Embeddings | HuggingFace `sentence-transformers/all-MiniLM-L6-v2` |
+| File Storage | Supabase Storage |
+| Embeddings | HuggingFace Inference API (`all-MiniLM-L6-v2`) |
 | LLM | Groq API (`llama-3.1-8b-instant`) |
-| Storage | Supabase Storage |
-
----
-
-## Architecture
-
-```
-PDF Upload
-    │
-    ▼
-Extract text (pdf-parse)
-    │
-    ▼
-Chunk into 500-word overlapping windows
-    │
-    ▼
-Embed chunks (HuggingFace) → store in pgvector
-    │
-    ▼
-User asks question
-    │
-    ▼
-Embed question → cosine similarity search (top 5 chunks)
-    │
-    ▼
-Groq LLM answers using retrieved context → cited response
-```
+| Deployment | Vercel (frontend) + Render (backend) |
 
 ---
 
 ## Features
 
-- Drag-and-drop PDF upload (max 25MB)
-- Overlapping chunk strategy to preserve context across boundaries
-- In-memory embedding cache — repeated queries skip the HuggingFace API call
-- HuggingFace model warm-up on server start to eliminate cold-start latency
-- Citation-backed answers — LLM cites `[1]`, `[2]` mapped to source chunks
-- Multi-message chat UI with typing indicator and collapsible sources
+- Drag-and-drop PDF upload (up to 25MB)
+- Overlapping chunk strategy so context is never lost at boundaries
+- In-memory embedding cache to skip redundant HuggingFace API calls
+- Model warm-up on server start to eliminate cold-start latency
+- Citation-backed answers with collapsible source viewer
+- Multi-message chat UI with typing indicator
 
 ---
 
 ## Running Locally
 
 ### Prerequisites
-
 - Node.js 18+
-- A [Supabase](https://supabase.com) project with pgvector enabled
-- [HuggingFace](https://huggingface.co) API key (free)
-- [Groq](https://console.groq.com) API key (free)
+- Supabase project with pgvector extension enabled
+- HuggingFace API key (free tier)
+- Groq API key (free tier)
 
-### Supabase Setup
+### Setup
 
-Run this SQL in your Supabase SQL editor:
-
-```sql
-create extension if not exists vector;
-
-create table documents (
-  id uuid primary key default gen_random_uuid(),
-  filename text not null,
-  storage_path text not null,
-  created_at timestamptz default now()
-);
-
-create table chunks (
-  id uuid primary key default gen_random_uuid(),
-  doc_id uuid references documents(id) on delete cascade,
-  chunk_index integer not null,
-  text text not null,
-  embedding vector(384)
-);
-
-create or replace function match_chunks(
-  query_embedding vector(384),
-  match_doc_id uuid,
-  match_count int
-)
-returns table (id uuid, chunk_index integer, text text, similarity float)
-language sql stable
-as $$
-  select id, chunk_index, text,
-    1 - (embedding <=> query_embedding) as similarity
-  from chunks
-  where doc_id = match_doc_id
-  order by embedding <=> query_embedding
-  limit match_count;
-$$;
-```
-
-Create a storage bucket named `pdfs`.
-
-### Backend
+Clone the repo, then set up the backend:
 
 ```bash
 cd server
 npm install
-```
-
-Create `server/.env`:
-
-```
-SUPABASE_URL=your_supabase_url
-SUPABASE_SERVICE_ROLE_KEY=your_service_role_key
-SUPABASE_BUCKET=pdfs
-HUGGINGFACE_API_KEY=your_hf_key
-GROQ_API_KEY=your_groq_key
-PORT=8080
-```
-
-```bash
+# create server/.env with your keys (see Environment Variables below)
 npm run dev
 ```
 
-### Frontend
+And the frontend:
 
 ```bash
 cd client
@@ -149,45 +105,29 @@ npm install
 npm run dev
 ```
 
-Open [http://localhost:5173](http://localhost:5173).
+### Environment Variables
+
+**Backend** (`server/.env`):
+```
+SUPABASE_URL=
+SUPABASE_SERVICE_ROLE_KEY=
+SUPABASE_BUCKET=pdfs
+HUGGINGFACE_API_KEY=
+GROQ_API_KEY=
+PORT=8080
+```
+
+**Frontend** (`client/.env.local`):
+```
+VITE_API_URL=http://localhost:8080
+```
 
 ---
 
-## API
+## API Reference
 
-### `POST /upload`
-
-Accepts `multipart/form-data` with a `file` field (PDF).
-
-```json
-{
-  "ok": true,
-  "docId": "uuid",
-  "filename": "paper.pdf",
-  "chunkCount": 42,
-  "message": "Stored PDF + chunks + embeddings ✅"
-}
-```
-
-### `POST /query`
-
-```json
-// Request
-{ "docId": "uuid", "question": "What are the main findings?" }
-
-// Response
-{
-  "ok": true,
-  "answer": "The main findings are... [1][2]",
-  "sources": [
-    { "chunkIndex": 3, "text": "..." },
-    { "chunkIndex": 7, "text": "..." }
-  ]
-}
-```
-
-### `GET /health`
-
-```json
-{ "ok": true, "message": "DocuQuery backend running 🚀" }
-```
+| Method | Endpoint | Description |
+|---|---|---|
+| `POST` | `/upload` | Upload a PDF, triggers full ingestion pipeline |
+| `POST` | `/query` | Ask a question against a document |
+| `GET` | `/health` | Health check |
